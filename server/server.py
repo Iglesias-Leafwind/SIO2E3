@@ -7,6 +7,9 @@ import binascii
 import json
 import os
 import math
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -26,6 +29,12 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
 
 CATALOG_BASE = 'catalog'
 CHUNK_SIZE = 1024 * 4
+
+algorithms = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
+modes = ['GCM', 'CFB', 'CBC', 'CTR', 'OFB']
+dg =['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
+CSUIT = ""
+
 class MediaServer(resource.Resource):
     isLeaf = True
 
@@ -124,12 +133,7 @@ class MediaServer(resource.Resource):
         try:
             if request.path == b'/api/protocols':
                 return self.do_get_protocols(request)
-            elif request.path == b'/api/csuit':
-                return ("LMAO").encode('latin')
-            elif request.path == b'/api/key':
-                return ("LMAO").encode('latin')
-            elif request.uri == 'api/auth':
-                return ("LMAO").encode('latin')
+
             elif request.path == b'/api/list':
                 return self.do_list(request)
 
@@ -148,9 +152,42 @@ class MediaServer(resource.Resource):
     # Handle a POST request
     def render_POST(self, request):
         logger.debug(f'Received POST for {request.uri}')
-        request.setResponseCode(501)
-        return b''
 
+        try:
+            if request.path == b'/api/csuit':
+                CSUIT = request.content.getvalue().decode('latin')
+                vars = CSUIT.split("_")
+                if vars[0] in algorithms and vars[1] in modes and vars[2] in dg:
+                    request.setResponseCode(200)
+                    CSUIT = request.content.getvalue().decode('latin')
+                    return b''
+                elif request.path == b'/api/difhell':
+                    # Generate a private key for use in the exchange.
+                    private_key = parameters.generate_private_key()
+                    peer_public_key = request.content.getvalue()
+                    shared_key = private_key.exchange(peer_public_key)
+                    # Perform key derivation.
+                    derived_key = HKDF(
+                        algorithm=hashes.SHA256(),
+                        length=32,
+                        salt=None,
+                        info=b'handshake data').derive(shared_key)
+                    # key used for this client
+                    # derived_key
+                    return b''
+
+                else:
+                    request.setResponseCode(201)
+                    return b''
+            else:
+                request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+                return b'Methods: /api/csuit'
+
+        except Exception as e:
+            logger.exception(e)
+            request.setResponseCode(500)
+            request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
+            return b''
 
 print("Server started")
 print("URL is: http://IP:8080")
