@@ -10,6 +10,7 @@ import math
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import serialization
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -34,6 +35,8 @@ algorithms = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
 modes = ['GCM', 'CFB', 'CBC', 'CTR', 'OFB']
 dg =['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
 CSUIT = ""
+# Generate some parameters. These can be reused.
+parameters = dh.generate_parameters(generator=2, key_size=512)
 
 class MediaServer(resource.Resource):
     isLeaf = True
@@ -161,24 +164,31 @@ class MediaServer(resource.Resource):
                     request.setResponseCode(200)
                     CSUIT = request.content.getvalue().decode('latin')
                     return b''
-                elif request.path == b'/api/difhell':
-                    # Generate a private key for use in the exchange.
-                    private_key = parameters.generate_private_key()
-                    peer_public_key = request.content.getvalue()
-                    shared_key = private_key.exchange(peer_public_key)
-                    # Perform key derivation.
-                    derived_key = HKDF(
-                        algorithm=hashes.SHA256(),
-                        length=32,
-                        salt=None,
-                        info=b'handshake data').derive(shared_key)
-                    # key used for this client
-                    # derived_key
-                    return b''
-
                 else:
                     request.setResponseCode(201)
                     return b''
+            elif request.path == b'/api/difhell':
+                # key negotiation
+                # Generate a private key for use in the exchange.
+                private_key = parameters.generate_private_key()
+                public_key = private_key.public_key()
+                peer_public_key = serialization.load_pem_public_key(
+                    request.content.getvalue())
+                shared_key = private_key.exchange(peer_public_key)
+                # Perform key derivation.
+                derived_key = HKDF(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=None,
+                    info=b'handshake data').derive(shared_key)
+                # KEY para o resto da sessao
+                # derived_key
+
+                pem = public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo)
+
+                return pem
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 return b'Methods: /api/csuit'

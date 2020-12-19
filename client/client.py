@@ -12,12 +12,13 @@ from cryptography.hazmat.primitives.ciphers import (
     Cipher, algorithms, modes
 )
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import serialization
 
 CSUIT = ""
 cifra = ""
 iv = os.urandom(16)
 # Generate some parameters. These can be reused.
-#parameters = dh.generate_parameters(generator=2, key_size=2048)
+parameters = dh.generate_parameters(generator=2, key_size=512)
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -103,12 +104,18 @@ def main():
             break
     if(code != 200):
         return
-    """
     #key negotiation
     # Generate a private key for use in the exchange.
     private_key = parameters.generate_private_key()
-    posting = requests.post(f'{SERVER_URL}/api/difhell',data=private_key.public_key())
-    server_public_key = posting.text()
+
+    public_key = private_key.public_key()
+    pem = public_key.public_bytes(
+    encoding = serialization.Encoding.PEM,
+    format = serialization.PublicFormat.SubjectPublicKeyInfo)
+    posting = requests.post(f'{SERVER_URL}/api/difhell',data=pem)
+    server_public_key = serialization.load_pem_public_key(
+    posting.text.encode('latin'))
+
     shared_key = private_key.exchange(server_public_key)
     # Perform key derivation.
     derived_key = HKDF(
@@ -118,7 +125,6 @@ def main():
     info = b'handshake data').derive(shared_key)
     #KEY para o resto da sessao
     #derived_key
-    """
     # TODO: Secure the session
 
     req = requests.get(f'{SERVER_URL}/api/list')
