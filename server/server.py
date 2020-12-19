@@ -26,7 +26,6 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
 
 CATALOG_BASE = 'catalog'
 CHUNK_SIZE = 1024 * 4
-
 class MediaServer(resource.Resource):
     isLeaf = True
 
@@ -94,7 +93,7 @@ class MediaServer(resource.Resource):
         if not valid_chunk:
             request.setResponseCode(400)
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'invalid chunk id'}).encode('latin')
+            return json.dumps({'error': 'invalid chunk id','data': 'brak'}).encode('latin')
             
         logger.debug(f'Download: chunk: {chunk_id}')
 
@@ -125,10 +124,12 @@ class MediaServer(resource.Resource):
         try:
             if request.path == b'/api/protocols':
                 return self.do_get_protocols(request)
-            #elif request.uri == 'api/key':
-            #...
-            #elif request.uri == 'api/auth':
-
+            elif request.path == b'/api/csuit':
+                return ("LMAO").encode('latin')
+            elif request.path == b'/api/key':
+                return ("LMAO").encode('latin')
+            elif request.uri == 'api/auth':
+                return ("LMAO").encode('latin')
             elif request.path == b'/api/list':
                 return self.do_list(request)
 

@@ -74,7 +74,9 @@ def main():
             proc.stdin.write(data)
         except:
             break
-
+    proc.stdin.close()
+    proc.kill()
+    proc.terminate()
 if __name__ == '__main__':
     while True:
         main()
