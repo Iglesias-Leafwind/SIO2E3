@@ -35,6 +35,7 @@ algorithms = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
 modes = ['GCM', 'CFB', 'CBC', 'CTR', 'OFB']
 dg =['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
 CSUIT = ""
+users = []
 # Generate some parameters. These can be reused.
 parameters = dh.generate_parameters(generator=2, key_size=512)
 
@@ -131,7 +132,8 @@ class MediaServer(resource.Resource):
 
     # Handle a GET request
     def render_GET(self, request):
-        logger.debug(f'Received request for {request.uri}')
+        who = request.received_cookies["session_id".encode('latin')].decode('latin')
+        logger.debug(f'{who} : Received request for {request.uri}')
 
         try:
             if request.path == b'/api/protocols':
@@ -154,8 +156,9 @@ class MediaServer(resource.Resource):
     
     # Handle a POST request
     def render_POST(self, request):
-        logger.debug(f'Received POST for {request.uri}')
-
+        global users
+        who = request.received_cookies["session_id".encode('latin')].decode('latin')
+        logger.debug(f'{who} : Received POST for {request.uri}')
         try:
             if request.path == b'/api/csuit':
                 CSUIT = request.content.getvalue().decode('latin')
@@ -189,6 +192,19 @@ class MediaServer(resource.Resource):
                     format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
                 return pem
+            elif request.path == b'/api/bye':
+                if request.content.getvalue() == b"encripted bye message":
+                    users.remove(who.encode('latin'))
+                    return b"bye"
+                return b"No"
+            elif request.path == b'/api/hello':
+                if(who.encode('latin') in users):
+                    return b"hello"
+                who = os.urandom(16)
+                while(who in users):
+                    who = os.urandom(16)
+                users += [who]
+                return who
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 return b'Methods: /api/csuit'
