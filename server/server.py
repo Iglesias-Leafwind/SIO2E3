@@ -11,6 +11,9 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.ciphers import (
+    Cipher, algorithms, modes
+)
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -31,13 +34,50 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
 CATALOG_BASE = 'catalog'
 CHUNK_SIZE = 1024 * 4
 
-algorithms = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
-modes = ['GCM', 'CFB', 'CBC', 'CTR', 'OFB']
+algort = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
+modos = ['GCM', 'CFB', 'CBC', 'CTR', 'OFB']
 dg =['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
-CSUIT = ""
 users = []
+CSUIT = {}
+digests = {}
+ciphers = {}
 # Generate some parameters. These can be reused.
 parameters = dh.generate_parameters(generator=2, key_size=512)
+
+def start_cifra(key,iv,who):
+    global digests
+    global CSUIT
+    alg,modo,dige = CSUIT[who].split("_")
+    if(dige == "SHA256"):
+        digests[who] = hashes.Hash(hashes.SHA256())
+    elif(dige == "SHA512"):
+        digests[who] = hashes.Hash(hashes.SHA512())
+    elif(dige == "SHA3256"):
+        digests[who] = hashes.Hash(hashes.SHA3_256())
+    elif(dige == "SHA3512"):
+        digests[who] = hashes.Hash(hashes.SHA3_512())
+    if(modo == 'GCM'):
+        mode = modes.GCM(iv)
+    elif(modo == 'CFB'):
+        mode = modes.CFB(iv)
+    elif(modo == 'CBC'):
+        mode = modes.CBC(iv)
+    elif(modo == 'CTR'):
+        mode = modes.CTR(iv)
+    elif(modo == 'OFB'):
+        mode = modes.OFB(iv)
+    if(alg == 'AES'):
+        algorithm = algorithms.AES(key)
+    elif(alg == 'SEED'):
+        algorithm = algorithms.SEED(key)
+    elif(alg == 'CAST5'):
+        algorithm = algorithms.CAST5(key)
+    elif(alg == 'TripleDES'):
+        algorithm = algorithms.TripleDES(key)
+    elif(alg == 'Camellia'):
+        algorithm = algorithms.Camellia(key)
+    cifra = Cipher(algorithm,mode)
+    return cifra
 
 class MediaServer(resource.Resource):
     isLeaf = True
@@ -66,7 +106,6 @@ class MediaServer(resource.Resource):
         # Return list to client
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         return json.dumps(media_list, indent=4).encode('latin')
-
 
     # Send a media chunk to the client
     def do_download(self, request):
@@ -157,15 +196,18 @@ class MediaServer(resource.Resource):
     # Handle a POST request
     def render_POST(self, request):
         global users
+        global CSUIT
+        global keys
+        global ciphers
+        global digests
         who = request.received_cookies["session_id".encode('latin')].decode('latin')
         logger.debug(f'{who} : Received POST for {request.uri}')
         try:
             if request.path == b'/api/csuit':
-                CSUIT = request.content.getvalue().decode('latin')
-                vars = CSUIT.split("_")
-                if vars[0] in algorithms and vars[1] in modes and vars[2] in dg:
+                vars = (request.content.getvalue().decode('latin')).split("_")
+                if vars[0] in algort and vars[1] in modos and vars[2] in dg:
                     request.setResponseCode(200)
-                    CSUIT = request.content.getvalue().decode('latin')
+                    CSUIT[who] = request.content.getvalue().decode('latin')
                     return b''
                 else:
                     request.setResponseCode(201)
@@ -181,33 +223,53 @@ class MediaServer(resource.Resource):
                 # Perform key derivation.
                 derived_key = HKDF(
                     algorithm=hashes.SHA256(),
-                    length=32,
+                    length=96,
                     salt=None,
                     info=b'handshake data').derive(shared_key)
                 # KEY para o resto da sessao
                 # derived_key
-
+                key1 = HKDF(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=None,
+                    info=b'handshake data').derive(derived_key[0:31])
+                key2 = HKDF(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=None,
+                    info=b'handshake data').derive(derived_key[32:63])
+                key3 = HKDF(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=None,
+                    info=b'handshake data').derive(derived_key[64:95])
+                iv1 = os.urandom(16)
+                iv2 = os.urandom(16)
+                iv3 = os.urandom(16)
                 pem = public_key.public_bytes(
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo)
-
-                return pem
+                cf1 = start_cifra(key1,iv1,who)
+                cf2 = start_cifra(key2,iv2,who)
+                cf3 = start_cifra(key3,iv3,who)
+                ciphers[who] = [cf1,cf2,cf3]
+                return json.dumps({'pem':pem.decode('latin'),'ivs':[iv1.decode('latin'),iv2.decode('latin'),iv3.decode('latin')]}, indent=4).encode('latin')
             elif request.path == b'/api/bye':
                 if request.content.getvalue() == b"encripted bye message":
-                    users.remove(who.encode('latin'))
+                    users.remove(who)
                     return b"bye"
                 return b"No"
             elif request.path == b'/api/hello':
-                if(who.encode('latin') in users):
+                if(who in users):
                     return b"hello"
                 who = os.urandom(16)
-                while(who in users):
+                while(who.decode('latin') in users):
                     who = os.urandom(16)
-                users += [who]
+                users += [who.decode('latin')]
                 return who
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                return b'Methods: /api/csuit'
+                return b'Methods: /api/csuit /api/hello /api/bye /api/difhell'
 
         except Exception as e:
             logger.exception(e)

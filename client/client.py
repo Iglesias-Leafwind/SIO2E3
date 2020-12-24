@@ -3,22 +3,21 @@
     done?31-Unique users id created from server
     done?2-Verification if already logged in (with flag)
     done?3-Bye server message
-4-Arranjar global variables???
-5-Mudar length da derivacao da key para criar 3 keys ao mesmo tempo 1 para criptar data outra para hmac e outra para mensagem
+    done?4-Arranjar global variables???
+    done?5-Mudar length da derivacao da key para criar 3 keys ao mesmo tempo 1 para criptar data outra para hmac e outra para mensagem
 6-Set a todas mensagens para estarem criptadas com um hmac (a mensagem enviada com estes 2 tambem estara encriptada com uma 3 key)
 7-Set a todos chunks com derivação das keys pela principal e por algo no ficheiro?
 8-Escrever o protocolo de como isto tudo foi feito para o relatorio
-NOTA a maneira como guardamos no cliente e no server as chaves usadas para cifrar vai ser diferente
 """
 # TODO SERVER
 """
     done?1-Gerar um id para cada cliente
     done?2-Aceitar um hello e criar o cliente caso ele n esteja ja ligado se estiver n faz nada ou envia um hello de resposta para dizer que o user ja esta com uma sessao
     done?3-Quando receber bye message eleminar cliente
-4-Gerar um iv no csuit e mandar ao cliente com o csuit
-5-Criar dicionarios para guardar toda informação necessaria
-6-No dicionario das keys vai estar por ordem (keyCifrarTudo,keyCifrarData,keyCifrarMac)
-7-Arranjar global variables???
+    done?4-Gerar ivs e mandar ao cliente 
+    done?5-Criar dicionarios para guardar toda informação necessaria
+    done?6-No dicionario das keys vai estar por ordem (keyCifrarTudo,keyCifrarData,keyCifrarMac)
+    done?7-Arranjar global variables???
 8-Set a todas mensagens para estarem criptadas de acordo com o uuid da pessoa e as suas keys
 9-Derivaçao das chaves por chunk pelas keys e por algo no ficheiro
 10-Escrever o protocolo de isto tudo para o relatorio
@@ -52,7 +51,7 @@ from cryptography.hazmat.primitives import serialization
 
 cookies = {'session_id': 'noID'}
 CSUIT = ""
-iv = os.urandom(16)
+cifras = []
 # Generate some parameters. These can be reused.
 parameters = dh.generate_parameters(generator=2, key_size=512)
 
@@ -63,10 +62,9 @@ logger.setLevel(logging.INFO)
 
 SERVER_URL = 'http://127.0.0.1:8080'
 
-def start_cifra(key):
-    global iv
-    global cifra
+def start_cifra(key,iv):
     global digest
+    global CSUIT
     alg,modo,dige = CSUIT.split("_")
     if(dige == "SHA256"):
         digest = hashes.Hash(hashes.SHA256())
@@ -96,17 +94,18 @@ def start_cifra(key):
         algorithm = algorithms.TripleDES(key)
     elif(alg == 'Camellia'):
         algorithm = algorithms.Camellia(key)
-    cifra = Cipher(algorithm,modo)
+    cifra = Cipher(algorithm,mode)
+    return cifra
 
-def cifrar(data):
-    global cifra
+def cifrar(data,cifra):
+    global digest
     criptar = cifra.encryptor()
     cifrado = criptar.update(data.encode('latin')) + criptar.finalize()
     MAC = digest.update(cifrado) + digest.finalize()
-    dict = {'data':cifrado,'MAC':MAC}
+    dict = {'data':cifrado,'HMAC':MAC}
     return criptar.update(json.dumps(dict, indent=4).encode('latin')) + criptar.finalize()
 
-def decifrar(data):
+def decifrar(data,cifra):
     global digest
     MAClinha = digest.update(data['data']) + digest.finalize()
     if(MAClinha != data['MAC']):
@@ -122,6 +121,8 @@ def main():
     print("|         SECURE MEDIA CLIENT          |")
     print("|--------------------------------------|\n")
     global activesession
+    global cifras
+    global CSUIT
     if not activesession:
         # Get a list of media files
         print("Contacting Server")
@@ -157,19 +158,38 @@ def main():
             encoding = serialization.Encoding.PEM,
             format = serialization.PublicFormat.SubjectPublicKeyInfo)
             posting = requests.post(f'{SERVER_URL}/api/difhell',data=pem, cookies=cookies)
+            info = posting.json()
+            ivs = info['ivs']
             server_public_key = serialization.load_pem_public_key(
-            posting.text.encode('latin'))
+            info['pem'].encode('latin'))
 
             shared_key = private_key.exchange(server_public_key)
             # Perform key derivation.
             derived_key = HKDF(
-            algorithm = hashes.SHA256(),
-            length = 32,
-            salt = None,
-            info = b'handshake data').derive(shared_key)
-            #KEY para o resto da sessao
-            #derived_key
-            # TODO: Secure the session
+                algorithm=hashes.SHA256(),
+                length=96,
+                salt=None,
+                info=b'handshake data').derive(shared_key)
+            # KEY para o resto da sessao
+            # derived_key
+            key1 = HKDF(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=None,
+                info=b'handshake data').derive(derived_key[0:31])
+            key2 = HKDF(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=None,
+                info=b'handshake data').derive(derived_key[32:63])
+            key3 = HKDF(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=None,
+                info=b'handshake data').derive(derived_key[64:95])
+            cifras += [start_cifra(key1,ivs[0].encode('latin'))]
+            cifras += [start_cifra(key2,ivs[1].encode('latin'))]
+            cifras += [start_cifra(key3,ivs[2].encode('latin'))]
         activesession = True
     req = requests.get(f'{SERVER_URL}/api/list', cookies=cookies)
     if req.status_code == 200:
