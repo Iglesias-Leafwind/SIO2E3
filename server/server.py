@@ -7,13 +7,14 @@ import binascii
 import json
 import os
 import math
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import (
     Cipher, algorithms, modes
 )
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, hmac
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -35,30 +36,35 @@ CATALOG_BASE = 'catalog'
 CHUNK_SIZE = 1024 * 4
 
 algort = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
-modos = ['GCM', 'CFB', 'CBC', 'CTR', 'OFB']
+modos = ['CFB', 'CBC', 'CTR', 'OFB']
 dg =['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
 users = []
 CSUIT = {}
-digests = {}
 ciphers = {}
 # Generate some parameters. These can be reused.
-parameters = dh.generate_parameters(generator=2, key_size=512)
+p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+g = 2
 
-def start_cifra(key,iv,who):
-    global digests
+params_numbers = dh.DHParameterNumbers(p,g)
+parameters = params_numbers.parameters(default_backend())
+
+def start_hmac(key,who):
     global CSUIT
     alg,modo,dige = CSUIT[who].split("_")
     if(dige == "SHA256"):
-        digests[who] = hashes.Hash(hashes.SHA256())
+        digest = hashes.SHA256()
     elif(dige == "SHA512"):
-        digests[who] = hashes.Hash(hashes.SHA512())
+        digest = hashes.SHA512()
     elif(dige == "SHA3256"):
-        digests[who] = hashes.Hash(hashes.SHA3_256())
+        digest = hashes.SHA3_256()
     elif(dige == "SHA3512"):
-        digests[who] = hashes.Hash(hashes.SHA3_512())
-    if(modo == 'GCM'):
-        mode = modes.GCM(iv)
-    elif(modo == 'CFB'):
+        digest = hashes.SHA3_512()
+    return hmac.HMAC(key, digest, backend=default_backend())
+
+def start_cifra(key,iv,who):
+    global CSUIT
+    alg,modo,dige = CSUIT[who].split("_")
+    if(modo == 'CFB'):
         mode = modes.CFB(iv)
     elif(modo == 'CBC'):
         mode = modes.CBC(iv)
@@ -78,6 +84,34 @@ def start_cifra(key,iv,who):
         algorithm = algorithms.Camellia(key)
     cifra = Cipher(algorithm,mode)
     return cifra
+
+def cifrar(data,who):
+    global ciphers
+    cifras = ciphers[who]
+    criptar = cifras[1].encryptor()
+    cifrado = criptar.update(data.encode('latin')) + criptar.finalize()
+    criptar = cifras[2].copy()
+    criptar.update(cifrado)
+    MAC = criptar.finalize()
+    dict = {'data':cifrado.decode('latin'),'HMAC':MAC.decode('latin')}
+    criptar = cifras[0].encryptor()
+    return criptar.update(json.dumps(dict, indent=4).encode('latin')) + criptar.finalize()
+
+def decifrar(data,who):
+    global ciphers
+    cifras = ciphers[who]
+    decriptar = cifras[0].decryptor()
+    decifrado = decriptar.update(data) + decriptar.finalize()
+    decifrado = json.loads(decifrado.decode('latin'))
+    decriptar = cifras[2].copy()
+    decriptar.update(decifrado['data'].encode('latin'))
+    MAClinha = decriptar.finalize()
+    if(MAClinha != decifrado['HMAC'].encode('latin')):
+        return "ERROR 500"
+
+    decriptar = cifras[1].decryptor()
+    decifrado = decriptar.update(decifrado['data'].encode('latin')) + decriptar.finalize()
+    return decifrado.decode('latin')
 
 class MediaServer(resource.Resource):
     isLeaf = True
@@ -212,6 +246,9 @@ class MediaServer(resource.Resource):
                 else:
                     request.setResponseCode(201)
                     return b''
+            elif request.path == b'/api/ok':
+                logger.debug(f'{who} : Received {decifrar(request.content.getvalue(),who)}')
+                return cifrar("NO",who)
             elif request.path == b'/api/difhell':
                 # key negotiation
                 # Generate a private key for use in the exchange.
@@ -219,6 +256,10 @@ class MediaServer(resource.Resource):
                 public_key = private_key.public_key()
                 peer_public_key = serialization.load_pem_public_key(
                     request.content.getvalue())
+                pem = public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo)
+                #with correct public key and correct private key echange doesn't work
                 shared_key = private_key.exchange(peer_public_key)
                 # Perform key derivation.
                 derived_key = HKDF(
@@ -245,15 +286,11 @@ class MediaServer(resource.Resource):
                     info=b'handshake data').derive(derived_key[64:95])
                 iv1 = os.urandom(16)
                 iv2 = os.urandom(16)
-                iv3 = os.urandom(16)
-                pem = public_key.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo)
                 cf1 = start_cifra(key1,iv1,who)
                 cf2 = start_cifra(key2,iv2,who)
-                cf3 = start_cifra(key3,iv3,who)
+                cf3 = start_hmac(key3,who)
                 ciphers[who] = [cf1,cf2,cf3]
-                return json.dumps({'pem':pem.decode('latin'),'ivs':[iv1.decode('latin'),iv2.decode('latin'),iv3.decode('latin')]}, indent=4).encode('latin')
+                return json.dumps({'pem':pem.decode('latin'),'ivs':[iv1.decode('latin'),iv2.decode('latin')]}, indent=4).encode('latin')
             elif request.path == b'/api/bye':
                 if request.content.getvalue() == b"encripted bye message":
                     users.remove(who)
