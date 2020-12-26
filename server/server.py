@@ -16,12 +16,14 @@ from cryptography.hazmat.primitives.ciphers import (
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, hmac
 
+#logs
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
-CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
+#music catalog
+CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
             {
                 'name': 'Sunny Afternoon - Upbeat Ukulele Background Music',
                 'album': 'Upbeat Ukulele Background Music',
@@ -35,19 +37,26 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
 CATALOG_BASE = 'catalog'
 CHUNK_SIZE = 1024 * 4
 
+#available csuit configs
 algort = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
-modos = ['CFB', 'CBC', 'CTR', 'OFB']
+modos = ['CFB', 'CTR', 'OFB']
 dg =['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
+#this is where we keep all user ids
+#TODO turn this into a dict with cc and id verification? or just use CC as ID?
 users = []
+#this is where we keep CSUIT of each user through their id
 CSUIT = {}
+#this is where we keep a list of ciphers used in the comunication through user id
 ciphers = {}
+dKey = {}
+readings = {}
 # Generate some parameters. These can be reused.
 p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
 g = 2
-
 params_numbers = dh.DHParameterNumbers(p,g)
 parameters = params_numbers.parameters(default_backend())
 
+#function used to initialize hmac based on key and user id
 def start_hmac(key,who):
     global CSUIT
     alg,modo,dige = CSUIT[who].split("_")
@@ -61,13 +70,12 @@ def start_hmac(key,who):
         digest = hashes.SHA3_512()
     return hmac.HMAC(key, digest, backend=default_backend())
 
+#function used to initialize cipher based on a key an iv and user id
 def start_cifra(key,iv,who):
     global CSUIT
     alg,modo,dige = CSUIT[who].split("_")
     if(modo == 'CFB'):
         mode = modes.CFB(iv)
-    elif(modo == 'CBC'):
-        mode = modes.CBC(iv)
     elif(modo == 'CTR'):
         mode = modes.CTR(iv)
     elif(modo == 'OFB'):
@@ -85,6 +93,7 @@ def start_cifra(key,iv,who):
     cifra = Cipher(algorithm,mode)
     return cifra
 
+#function used to encrypt data based on user id
 def cifrar(data,who):
     global ciphers
     cifras = ciphers[who]
@@ -97,6 +106,7 @@ def cifrar(data,who):
     criptar = cifras[0].encryptor()
     return criptar.update(json.dumps(dict, indent=4).encode('latin')) + criptar.finalize()
 
+#function used to decrypt data based on user id
 def decifrar(data,who):
     global ciphers
     cifras = ciphers[who]
@@ -117,7 +127,7 @@ class MediaServer(resource.Resource):
     isLeaf = True
 
     # Send the list of media files to clients
-    def do_list(self, request):
+    def do_list(self, request,who):
 
         #auth = request.getHeader('Authorization')
         #if not auth:
@@ -139,12 +149,15 @@ class MediaServer(resource.Resource):
 
         # Return list to client
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-        return json.dumps(media_list, indent=4).encode('latin')
+        return cifrar(json.dumps(media_list, indent=4),who)
 
     # Send a media chunk to the client
-    def do_download(self, request):
+    def do_download(self, request,who):
+        global dKey
+        global readings
+        global CSUIT
         logger.debug(f'Download: args: {request.args}')
-        
+
         media_id = request.args.get(b'id', [None])[0]
         logger.debug(f'Download: id: {media_id}')
 
@@ -152,8 +165,8 @@ class MediaServer(resource.Resource):
         if media_id is None:
             request.setResponseCode(400)
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'invalid media id'}).encode('latin')
-        
+            return cifrar(json.dumps({'error': 'invalid media id'}),who)
+
         # Convert bytes to str
         media_id = media_id.decode('latin')
 
@@ -161,8 +174,8 @@ class MediaServer(resource.Resource):
         if media_id not in CATALOG:
             request.setResponseCode(404)
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'media file not found'}).encode('latin')
-        
+            return cifrar(json.dumps({'error': 'media file not found'}),who)
+
         # Get the media item
         media_item = CATALOG[media_id]
 
@@ -179,29 +192,61 @@ class MediaServer(resource.Resource):
         if not valid_chunk:
             request.setResponseCode(400)
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'invalid chunk id','data': 'brak'}).encode('latin')
-            
-        logger.debug(f'Download: chunk: {chunk_id}')
+            return cifrar(json.dumps({'error': 'invalid chunk id','data': 'brak'}),who)
+        if(who not in readings.keys()):
+            readings[who] = {media_id:0}
+        elif(media_id not in readings[who].keys()):
+            readings[who][media_id] = 0
+
+        logger.debug(f'Download: chunk: {chunk_id} - readingsByChunk: {math.ceil((readings[who][media_id]*100) / media_item["file_size"])/100} ')
 
         offset = chunk_id * CHUNK_SIZE
 
+        #TODO verificaçao de licensa?
+        readings[who][media_id] += CHUNK_SIZE
         # Open file, seek to correct position and return the chunk
         with open(os.path.join(CATALOG_BASE, media_item['file_name']), 'rb') as f:
             f.seek(offset)
             data = f.read(CHUNK_SIZE)
 
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps(
+            # cifrar com rotação de chaves
+            # using dkey para derivar
+            alg,modo,dige = CSUIT[who].split("_")
+            blocksize = 16*8
+            if(alg == 'AES'):
+                blocksize = algorithms.AES.block_size
+            elif(alg == 'SEED'):
+                blocksize = algorithms.SEED.block_size
+            elif(alg == 'CAST5'):
+                blocksize = algorithms.CAST5.block_size
+            elif(alg == 'TripleDES'):
+                blocksize = algorithms.TripleDES.block_size
+            elif(alg == 'Camellia'):
+                blocksize = algorithms.Camellia.block_size
+            newIv = os.urandom(int(blocksize/8))
+            criptar = start_cifra(dKey[who],newIv,who).encryptor()
+            cifradoData = criptar.update(json.dumps(
                     {
-                        'media_id': media_id, 
-                        'chunk': chunk_id, 
+                        'media_id': media_id,
+                        'chunk': chunk_id,
                         'data': binascii.b2a_base64(data).decode('latin').strip()
                     },indent=4
-                ).encode('latin')
+                ).encode('latin')) + criptar.finalize()
+            dKey[who] = HKDF(
+                algorithm=hashes.SHA256(),
+                length=16,
+                salt=None,
+                info=b'handshake data').derive(dKey[who] + cifrar(cifradoData.decode('latin'),who))
+            hmacing = start_hmac(dKey[who],who).copy()
+            hmacing.update(cifradoData)
+            cifradoHMAC = hmacing.finalize()
+            dict = {'data': cifradoData.decode('latin'), 'HMAC': cifradoHMAC.decode('latin'), 'iv':newIv.decode('latin')}
+            return cifrar(json.dumps(dict, indent=4),who)
 
         # File was not open?
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-        return json.dumps({'error': 'unknown'}, indent=4).encode('latin')
+        return cifrar(json.dumps({'error': 'unknown'}, indent=4),who)
 
     # Handle a GET request
     def render_GET(self, request):
@@ -209,24 +254,21 @@ class MediaServer(resource.Resource):
         logger.debug(f'{who} : Received request for {request.uri}')
 
         try:
-            if request.path == b'/api/protocols':
-                return self.do_get_protocols(request)
-
-            elif request.path == b'/api/list':
-                return self.do_list(request)
+            if request.path == b'/api/list':
+                return self.do_list(request,who)
 
             elif request.path == b'/api/download':
-                return self.do_download(request)
+                return self.do_download(request,who)
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                return b'Methods: /api/protocols /api/list /api/download'
+                return b'Methods: /api/list /api/download'
 
         except Exception as e:
             logger.exception(e)
             request.setResponseCode(500)
             request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
             return b''
-    
+
     # Handle a POST request
     def render_POST(self, request):
         global users
@@ -234,6 +276,7 @@ class MediaServer(resource.Resource):
         global keys
         global ciphers
         global digests
+        global dkey
         who = request.received_cookies["session_id".encode('latin')].decode('latin')
         logger.debug(f'{who} : Received POST for {request.uri}')
         try:
@@ -271,32 +314,52 @@ class MediaServer(resource.Resource):
                 # derived_key
                 key1 = HKDF(
                     algorithm=hashes.SHA256(),
-                    length=32,
+                    length=16,
                     salt=None,
                     info=b'handshake data').derive(derived_key[0:31])
                 key2 = HKDF(
                     algorithm=hashes.SHA256(),
-                    length=32,
+                    length=16,
                     salt=None,
                     info=b'handshake data').derive(derived_key[32:63])
                 key3 = HKDF(
                     algorithm=hashes.SHA256(),
-                    length=32,
+                    length=16,
                     salt=None,
                     info=b'handshake data').derive(derived_key[64:95])
-                iv1 = os.urandom(16)
-                iv2 = os.urandom(16)
+                dKey[who] = HKDF(
+                    algorithm=hashes.SHA256(),
+                    length=16,
+                    salt=None,
+                    info=b'handshake data').derive(key1+key2+key3)
+
+                alg, modo, dige = CSUIT[who].split("_")
+                blocksize = 16*8
+                if (alg == 'AES'):
+                    blocksize = algorithms.AES.block_size
+                elif (alg == 'SEED'):
+                    blocksize = algorithms.SEED.block_size
+                elif (alg == 'CAST5'):
+                    blocksize = algorithms.CAST5.block_size
+                elif (alg == 'TripleDES'):
+                    blocksize = algorithms.TripleDES.block_size
+                elif (alg == 'Camellia'):
+                    blocksize = algorithms.Camellia.block_size
+                iv1 = os.urandom(int(blocksize/8))
+                iv2 = os.urandom(int(blocksize/8))
                 cf1 = start_cifra(key1,iv1,who)
                 cf2 = start_cifra(key2,iv2,who)
                 cf3 = start_hmac(key3,who)
                 ciphers[who] = [cf1,cf2,cf3]
                 return json.dumps({'pem':pem.decode('latin'),'ivs':[iv1.decode('latin'),iv2.decode('latin')]}, indent=4).encode('latin')
             elif request.path == b'/api/bye':
-                if request.content.getvalue() == b"encripted bye message":
+                #TODO check CC to say bye
+                if decifrar(request.content.getvalue(),who) == "encripted bye message":
                     users.remove(who)
                     return b"bye"
                 return b"No"
             elif request.path == b'/api/hello':
+                #TODO check CC and send user id if cc is correct
                 if(who in users):
                     return b"hello"
                 who = os.urandom(16)
