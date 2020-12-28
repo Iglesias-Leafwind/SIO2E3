@@ -47,8 +47,14 @@ from cryptography.hazmat.primitives.ciphers import (
 )
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, hmac
+from cryptography import x509, exceptions
+from cryptography.x509.oid import NameOID
+from datetime import datetime
+from cert_functs import *
+
 
 #cookies usadas para determinar o id deste cliente
 cookies = {'session_id': 'noID'}
@@ -70,6 +76,30 @@ logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.INFO)
 #Server URl
 SERVER_URL = 'http://127.0.0.1:8080'
+
+SERVER_PK = b'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0LfJElJMr7ZFq3ykXJmj\nEr4mmsMKAWJneiodSJcJ34nZJ8I9RfDX9BTz0K5UGsaeUumtfSDXu/C0P0diFEDM\nyAHdSAxDaMPeanke5VmyM4esjJN3L5zj4LAw7OgW2PxXILty0OP/7P9XxUASMcvX\n2uFUOkj/PTLrXeVR659S+0NPKnDymUd5Ckz1HHLyr9XEAJOiFouBpOkuemtGrD5W\no286pwDOcH4qn0vPenhhukR7lk2+35uLQx7/IUXjxy1thKAjj/HkKd8ZOmho2b5E\nuYswAjNKf0Zz2VJepEchpXhOegQUR4Oj+BfmTjPkgBjGbK89TmGZyM29gliclcHz\nVwIDAQAB\n-----END PUBLIC KEY-----\n'
+
+trusted_certs = {}
+
+client_cert = ""
+with open("client.crt", "rb") as file:
+    certificate_data = file.read()
+    client_cert = x509.load_pem_x509_certificate(certificate_data, backend=default_backend())
+
+all_files = os.scandir("/etc/ssl/certs")
+for f in all_files:
+    if not f.is_dir():
+        try:
+            cert = ""
+            with open(f, "rb") as file:
+                cert_data = file.read()
+                cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+
+            if datetime.now().timestamp() > cert.not_valid_before.timestamp() or datetime.now().timestamp() < cert.not_valid_after.timestamp():
+                trusted_certs[cert.subject.rfc4514_string()] = cert
+
+        except Exception as e:
+            print("Error: ", e, "\n")
 
 #função usada para inicializar o HMAC dependendo do modo de comunicação
 def start_hmac(key):
@@ -132,6 +162,7 @@ def decifrar(data):
     decriptar = cifras[1].decryptor()
     decifrado = decriptar.update(decifrado['data'].encode('latin')) + decriptar.finalize()
     return decifrado.decode('latin')
+
 #activesession é usado para ver se ja temos alguma sessao ja aberta ou nao
 activesession = False
 def main():
@@ -142,19 +173,34 @@ def main():
     global cifras
     global CSUIT
     global dKey
+    global client_cert
     #se ainda n existir uma activesession
     #TODO authentication using CC checking if I am allowed or not and getting server certificates and etc
+
     if not activesession:
         # Get a list of media files
         print("Contacting Server")
+
+        server_cert = requests.get(f'{SERVER_URL}/api/certs', cookies=cookies)
+        server_cert = x509.load_pem_x509_certificate(server_cert.content, backend=default_backend())
+
+        isVerified = False
+        for cert in trusted_certs.values():
+            if get_issuers(cert, trusted_certs, []):   
+                isVerified = True
+
+        if not isVerified:
+            return "ERROR 505"
+
         #dizemos hello ao server
-        posting = requests.post(f'{SERVER_URL}/api/hello',cookies=cookies,data="Hello")
+        posting = requests.post(f'{SERVER_URL}/api/hello',cookies=cookies,data=client_cert.public_bytes(encoding = serialization.Encoding.PEM))
         #se o que recebermos não é hello quer dizer que nao existe uma sessao aberta
         #TODO aqui autenticamos pelo cc e fechamos a sessao aberta se o cc for o correto
         #TODO E abrimos uma nova sessao
         if posting.text != "hello":
             #recebemos a id da nossa sessao e guardamos como um cookie que queremos enviar nas seguintes comunicações
             cookies['session_id'] = posting.text
+            print(posting.text)
             #CSUIT negotiation
             #TODO randomizar o csuit? amybe not cause we need to import random
             #TODO testar todos CSUIT (YES TODAS COMBINAções)
@@ -179,6 +225,7 @@ def main():
                     break
             if(code != 200):
                 return
+
             #key negotiation
             # Generate a private key for use in the exchange.
             private_key = parameters.generate_private_key()

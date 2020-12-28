@@ -15,6 +15,10 @@ from cryptography.hazmat.primitives.ciphers import (
 )
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, hmac
+from cryptography import x509
+from cryptography.x509.oid import ExtensionOID
+from datetime import datetime
+from cert_functs import *
 
 #logs
 logger = logging.getLogger('root')
@@ -55,6 +59,28 @@ p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B
 g = 2
 params_numbers = dh.DHParameterNumbers(p,g)
 parameters = params_numbers.parameters(default_backend())
+
+trusted_certs = {}
+
+server_cert = ""
+with open("localhost.crt", "rb") as file:
+    certificate_data = file.read()
+    server_cert = x509.load_pem_x509_certificate(certificate_data, backend=default_backend())
+
+all_files = os.scandir("/etc/ssl/certs")
+for f in all_files:
+    if not f.is_dir():
+        try:
+            cert = ""
+            with open(f, "rb") as file:
+                cert_data = file.read()
+                cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+
+            if datetime.now().timestamp() > cert.not_valid_before.timestamp() or datetime.now().timestamp() < cert.not_valid_after.timestamp():
+                trusted_certs[cert.subject.rfc4514_string()] = cert
+
+        except Exception as e:
+            print("Error: ", e, "\n")
 
 #function used to initialize hmac based on key and user id
 def start_hmac(key,who):
@@ -248,8 +274,32 @@ class MediaServer(resource.Resource):
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         return cifrar(json.dumps({'error': 'unknown'}, indent=4),who)
 
+    def verify_signature(self, client_cert):
+        global server_cert
+        try:
+            server_cert.public_key().verify(client_cert.signature, client_cert.tbs_certificate_bytes,)
+            return True
+        except InvalidSignature:
+            return False
+
+    def verify_dates(self, client_cert):
+        if datetime.now() > cert.not_valid_after or datetime.now() < cert.not_valid_before:
+            print("Expired Certificate")
+            return False
+        print("Valid Certificate")
+        return True
+    
+    def verify_extensions(seld, client_cert):
+        try:
+            values = client_cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE).values
+        except ExtensionNotFoundException:
+            print("Invalid certificate")
+            return False
+        return True
+
     # Handle a GET request
     def render_GET(self, request):
+        global cert
         who = request.received_cookies["session_id".encode('latin')].decode('latin')
         logger.debug(f'{who} : Received request for {request.uri}')
 
@@ -259,10 +309,12 @@ class MediaServer(resource.Resource):
 
             elif request.path == b'/api/download':
                 return self.do_download(request,who)
+            elif request.path == b'/api/certs':
+                return server_cert.public_bytes(encoding=serialization.Encoding.PEM)
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                return b'Methods: /api/list /api/download'
-
+                return b'Methods: /api/list /api/download' 
+            
         except Exception as e:
             logger.exception(e)
             request.setResponseCode(500)
@@ -362,11 +414,22 @@ class MediaServer(resource.Resource):
                 #TODO check CC and send user id if cc is correct
                 if(who in users):
                     return b"hello"
-                who = os.urandom(16)
-                while(who.decode('latin') in users):
+                bcert = request.content.getvalue()
+                client_cert = x509.load_pem_x509_certificate(bcert, backend=default_backend())
+                isVerified = False
+                for cert in trusted_certs.values():
+                    if get_issuers(cert, trusted_certs, []):
+                        isVerified = True
+                
+                if isVerified:
                     who = os.urandom(16)
-                users += [who.decode('latin')]
-                return who
+                    while(who.decode('latin') in users):
+                        who = os.urandom(16)
+                    users += [who.decode('latin')]
+                    return who
+                else:
+                    print(goodbye)
+                    return b"goobye"
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 return b'Methods: /api/csuit /api/hello /api/bye /api/difhell'
