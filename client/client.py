@@ -1,37 +1,7 @@
-#TODO LIST CLIENT
 """
-    done?31-Unique users id created from server
-    done?2-Verification if already logged in (with flag)
-    done?3-Bye server message
-    done?4-Arranjar global variables???
-    done?5-Mudar length da derivacao da key para criar 3 keys ao mesmo tempo 1 para criptar data outra para hmac e outra para mensagem
-    done?6-Set a todas mensagens para estarem criptadas com um hmac (a mensagem enviada com estes 2 tambem estara encriptada com uma 3 key)
-    done?7-Set a todos chunks com derivação das keys pela principal e por algo no ficheiro?
-8-Escrever o protocolo de como isto tudo foi feito para o relatorio
-"""
-# TODO SERVER
-"""
-    done?1-Gerar um id para cada cliente
-    done?2-Aceitar um hello e criar o cliente caso ele n esteja ja ligado se estiver n faz nada ou envia um hello de resposta para dizer que o user ja esta com uma sessao
-    done?3-Quando receber bye message eleminar cliente
-    done?4-Gerar ivs e mandar ao cliente 
-    done?5-Criar dicionarios para guardar toda informação necessaria
-    done?6-No dicionario das keys vai estar por ordem (keyCifrarTudo,keyCifrarData,keyCifrarMac)
-    done?7-Arranjar global variables???
-    done?8-Set a todas mensagens para estarem criptadas de acordo com o uuid da pessoa e as suas keys
-    doing?9-Derivaçao das chaves por chunk pelas keys e por algo no ficheiro
-10-Escrever o protocolo de isto tudo para o relatorio
-    done?NOTA a maneira como guardamos no cliente e no server as chaves usadas para cifrar vai ser diferente
-"""
-#TODO NOTAS
-"""
-    done?Fazer verificação de quanto é que um user ja viu
-    done?Encrypt then mac aka mac da cifra
 Licenca por musica que o user so precisa de mostrar por leitura da musica depois de receber a licenca
 Se a licenca acabar o user precisa pedir outra licenca / pede automaticamente
 User vai mandar o seu CC como identificador de log in e o server envia um uuid para ele distinguir os users
-    done?Sintese chunk pelo id do chunk?
-
 """
 import requests
 import logging
@@ -80,17 +50,13 @@ logger.setLevel(logging.INFO)
 SERVER_URL = 'http://127.0.0.1:8080'
 trusted_certs = {}
 
-client_cert = ""
-with open("client.crt", "rb") as file:
-    certificate_data = file.read()
-    client_cert = x509.load_pem_x509_certificate(certificate_data, backend=default_backend())
-
+"""
 crl = ""
 with open("GTS1O1core.crl", "rb") as file:
     crl_data = file.read()
     print(type(crl_data))
     crl = x509.load_pem_x509_crl(crl_data)
-
+"""
 all_files = os.scandir("/etc/ssl/certs")
 for f in all_files:
     if not f.is_dir():
@@ -193,9 +159,7 @@ def main():
     global cifras
     global CSUIT
     global dKey
-    global client_cert
     #se ainda n existir uma activesession
-    #TODO authentication using CC checking if I am allowed or not and getting server certificates and etc
 
     if not activesession:
         # Get a list of media files
@@ -206,7 +170,7 @@ def main():
 
         isVerified = True
 
-        chain = get_issuers(client_cert, trusted_certs, [])
+        chain = get_issuers(server_cert, trusted_certs, [])
         if chain:
             for cert in chain:
                 if not (verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and verify_dates(cert)):
@@ -216,6 +180,33 @@ def main():
 
         if not isVerified:
             return "ERROR 505"
+
+        pkcs11 = PyKCS11.PyKCS11Lib()
+        pkcs11.load("/usr/local/lib/libpteidpkcs11.so")
+
+        slots = pkcs11.getSlotList()
+
+        all_attr = list(PyKCS11.CKA.keys())
+
+        #Filter attributes
+        all_attr = [e for e in all_attr if isinstance(e, int)]
+
+        for slot in slots:
+            print(pkcs11.getTokenInfo(slot))
+            session = pkcs11.openSession(slot)
+
+            for obj in session.findObjects():
+                #Get Object attributes
+                attr = session.getAttributeValue(obj, all_attr)
+
+                #Create dictionary with attributes
+                attr = dict(zip(map(PyKCS11.CKA.get, all_attr), attr))
+
+                print(" Label: ", attr["CKA_LABEL"])
+
+                if attr["CKA_CLASS"] == 1:
+                    
+                    client_cert = load_certificate(bytes(attr["CKA_VALUE"]))
 
         #dizemos hello ao server
         posting = requests.post(f'{SERVER_URL}/api/hello',cookies=cookies,data=client_cert.public_bytes(encoding = serialization.Encoding.PEM))
@@ -227,8 +218,6 @@ def main():
             cookies['session_id'] = posting.text
             print(posting.text)
             #CSUIT negotiation
-            #TODO randomizar o csuit? amybe not cause we need to import random
-            #TODO testar todos CSUIT (YES TODAS COMBINAções)
             algorithms = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
             modes = ['CFB', 'CTR', 'OFB']
             dg = ['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
