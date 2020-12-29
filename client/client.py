@@ -76,9 +76,6 @@ logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.INFO)
 #Server URl
 SERVER_URL = 'http://127.0.0.1:8080'
-
-SERVER_PK = b'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0LfJElJMr7ZFq3ykXJmj\nEr4mmsMKAWJneiodSJcJ34nZJ8I9RfDX9BTz0K5UGsaeUumtfSDXu/C0P0diFEDM\nyAHdSAxDaMPeanke5VmyM4esjJN3L5zj4LAw7OgW2PxXILty0OP/7P9XxUASMcvX\n2uFUOkj/PTLrXeVR659S+0NPKnDymUd5Ckz1HHLyr9XEAJOiFouBpOkuemtGrD5W\no286pwDOcH4qn0vPenhhukR7lk2+35uLQx7/IUXjxy1thKAjj/HkKd8ZOmho2b5E\nuYswAjNKf0Zz2VJepEchpXhOegQUR4Oj+BfmTjPkgBjGbK89TmGZyM29gliclcHz\nVwIDAQAB\n-----END PUBLIC KEY-----\n'
-
 trusted_certs = {}
 
 client_cert = ""
