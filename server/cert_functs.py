@@ -13,7 +13,7 @@ def get_issuers(certificate, cert_dic, chain=[]):
         return chain
     
     if issuer in cert_dic:
-        return get_issuers(cert_dic[issuer], chain)
+        return get_issuers(cert_dic[issuer], cert_dic, chain)
 
     print("Unable to create the Trust Chain")
     return False

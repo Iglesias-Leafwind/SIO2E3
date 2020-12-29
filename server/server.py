@@ -7,7 +7,7 @@ import binascii
 import json
 import os
 import math
-from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.asymmetric import dh, padding
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import (
@@ -274,22 +274,22 @@ class MediaServer(resource.Resource):
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         return cifrar(json.dumps({'error': 'unknown'}, indent=4),who)
 
-    def verify_signature(self, client_cert):
+    def verify_signature(self, issuer, client_cert):
         global server_cert
         try:
-            server_cert.public_key().verify(client_cert.signature, client_cert.tbs_certificate_bytes,)
+            issuer.public_key().verify(client_cert.signature, client_cert.tbs_certificate_bytes, padding.PKCS1v15(), client_cert.signature_hash_algorithm,)
             return True
         except InvalidSignature:
             return False
 
     def verify_dates(self, client_cert):
-        if datetime.now() > cert.not_valid_after or datetime.now() < cert.not_valid_before:
+        if datetime.now().timestamp() > cert.not_valid_after.timestamp() or datetime.now().timestamp() < cert.not_valid_before.timestamp():
             print("Expired Certificate")
             return False
         print("Valid Certificate")
         return True
     
-    def verify_extensions(seld, client_cert):
+    def verify_extensions(self, client_cert):
         try:
             values = client_cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE).values
         except ExtensionNotFoundException:
@@ -416,11 +416,17 @@ class MediaServer(resource.Resource):
                     return b"hello"
                 bcert = request.content.getvalue()
                 client_cert = x509.load_pem_x509_certificate(bcert, backend=default_backend())
-                isVerified = False
-                for cert in trusted_certs.values():
-                    if get_issuers(cert, trusted_certs, []):
-                        isVerified = True
                 
+                isVerified = True
+
+                chain = get_issuers(client_cert, trusted_certs, [])
+                if chain:
+                    for cert in chain:
+                        if not (self.verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and self.verify_dates(cert)):
+                            isVerified = False
+                else:
+                    isVerified = False
+
                 if isVerified:
                     who = os.urandom(16)
                     while(who.decode('latin') in users):

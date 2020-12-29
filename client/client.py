@@ -41,7 +41,7 @@ import os
 import subprocess
 import time
 import sys
-from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.asymmetric import dh, padding
 from cryptography.hazmat.primitives.ciphers import (
     Cipher, algorithms, modes
 )
@@ -54,6 +54,8 @@ from cryptography import x509, exceptions
 from cryptography.x509.oid import NameOID
 from datetime import datetime
 from cert_functs import *
+import PyKCS11
+import binascii
 
 
 #cookies usadas para determinar o id deste cliente
@@ -82,6 +84,12 @@ client_cert = ""
 with open("client.crt", "rb") as file:
     certificate_data = file.read()
     client_cert = x509.load_pem_x509_certificate(certificate_data, backend=default_backend())
+
+crl = ""
+with open("GTS1O1core.crl", "rb") as file:
+    crl_data = file.read()
+    print(type(crl_data))
+    crl = x509.load_pem_x509_crl(crl_data)
 
 all_files = os.scandir("/etc/ssl/certs")
 for f in all_files:
@@ -160,6 +168,21 @@ def decifrar(data):
     decifrado = decriptar.update(decifrado['data'].encode('latin')) + decriptar.finalize()
     return decifrado.decode('latin')
 
+def verify_signature(issuer, client_cert):
+    global server_cert
+    try:
+        issuer.public_key().verify(client_cert.signature, client_cert.tbs_certificate_bytes, padding.PKCS1v15(), client_cert.signature_hash_algorithm,)
+        return True
+    except exceptions.InvalidSignature:
+        return False
+
+def verify_dates(client_cert):
+    if datetime.now().timestamp() > cert.not_valid_after.timestamp() or datetime.now().timestamp() < cert.not_valid_before.timestamp():
+        print("Expired Certificate")
+        return False
+    print("Valid Certificate")
+    return True
+
 #activesession é usado para ver se ja temos alguma sessao ja aberta ou nao
 activesession = False
 def main():
@@ -181,10 +204,15 @@ def main():
         server_cert = requests.get(f'{SERVER_URL}/api/certs', cookies=cookies)
         server_cert = x509.load_pem_x509_certificate(server_cert.content, backend=default_backend())
 
-        isVerified = False
-        for cert in trusted_certs.values():
-            if get_issuers(cert, trusted_certs, []):   
-                isVerified = True
+        isVerified = True
+
+        chain = get_issuers(client_cert, trusted_certs, [])
+        if chain:
+            for cert in chain:
+                if not (verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and verify_dates(cert)):
+                    isVerified = False
+        else:
+            isVerified = False
 
         if not isVerified:
             return "ERROR 505"
