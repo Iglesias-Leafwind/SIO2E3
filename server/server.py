@@ -286,16 +286,27 @@ class MediaServer(resource.Resource):
         if datetime.now().timestamp() > cert.not_valid_after.timestamp() or datetime.now().timestamp() < cert.not_valid_before.timestamp():
             print("Expired Certificate")
             return False
-        print("Valid Certificate")
         return True
     
     def verify_extensions(self, client_cert):
+        values = ""
+        flag = ""
         try:
-            values = client_cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE).values
-        except ExtensionNotFoundException:
-            print("Invalid certificate")
-            return False
-        return True
+            values = client_cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE).value
+            flag = "i"
+        except x509.ExtensionNotFound:
+            values = client_cert.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+            flag = "ca"
+
+        if flag == "i":
+            for value in values:
+                print("here " + value._name)
+                if (flag == "i" and value._name == "clientAuth"):
+                    return True
+        else:
+            if (flag == "ca" and values.key_cert_sign):
+                return True
+        return False
 
     # Handle a GET request
     def render_GET(self, request):
@@ -422,7 +433,7 @@ class MediaServer(resource.Resource):
                 chain = get_issuers(client_cert, trusted_certs, [])
                 if chain:
                     for cert in chain:
-                        if not (self.verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and self.verify_dates(cert)):
+                        if not (self.verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and self.verify_dates(cert) and self.verify_extensions(cert)):
                             isVerified = False
                 else:
                     isVerified = False
@@ -434,7 +445,7 @@ class MediaServer(resource.Resource):
                     users += [who.decode('latin')]
                     return who
                 else:
-                    return b"goobye"
+                    return b"goodbye"
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 return b'Methods: /api/csuit /api/hello /api/bye /api/difhell'

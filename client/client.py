@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography import x509, exceptions
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import NameOID, ExtensionOID
 from datetime import datetime
 from cert_functs import *
 import PyKCS11
@@ -147,8 +147,27 @@ def verify_dates(client_cert):
     if datetime.now().timestamp() > cert.not_valid_after.timestamp() or datetime.now().timestamp() < cert.not_valid_before.timestamp():
         print("Expired Certificate")
         return False
-    print("Valid Certificate")
     return True
+
+def verify_extensions(client_cert):
+    values = ""
+    flag = ""
+    try:
+        values = client_cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE).value
+        flag = "i"
+    except x509.ExtensionNotFound:
+        values = client_cert.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+        flag = "ca"
+
+    if flag == "i":
+        for value in values:
+            print("here " + value._name)
+            if (flag == "i" and value._name == "clientAuth"):
+                return True
+    else:
+        if (flag == "ca" and values.key_cert_sign):
+            return True
+    return False
 
 #activesession é usado para ver se ja temos alguma sessao ja aberta ou nao
 activesession = False
@@ -174,14 +193,13 @@ def main():
         chain = get_issuers(server_cert, trusted_certs, [])
         if chain:
             for cert in chain:
-                if not (verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and verify_dates(cert)):
+                if not (verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and verify_dates(cert) and verify_extensions(cert)):
                     isVerified = False
         else:
             isVerified = False
-
         if not isVerified:
             return "ERROR 505"
-
+        
         pkcs11 = PyKCS11.PyKCS11Lib()
         pkcs11.load("/usr/local/lib/libpteidpkcs11.so")
 
@@ -191,7 +209,7 @@ def main():
 
         #Filter attributes
         all_attr = [e for e in all_attr if isinstance(e, int)]
-
+        
         client_cert = ""
         for slot in slots:
             session = pkcs11.openSession(slot)
@@ -207,14 +225,20 @@ def main():
 
                 if attr["CKA_CLASS"] == 1:
                     client_cert = x509.load_der_x509_certificate(bytes(attr["CKA_VALUE"]), default_backend())
-
+        """
+        with open("client.crt", "rb") as file:
+            data = file.read()
+        
+        client_cert = x509.load_pem_x509_certificate(c, backend=default_backend())
+        """
         #dizemos hello ao server
         posting = requests.post(f'{SERVER_URL}/api/hello',cookies=cookies,data=client_cert.public_bytes(encoding = serialization.Encoding.PEM))
         #se o que recebermos não é hello quer dizer que nao existe uma sessao aberta
-        if posting.text != "hello":
+        if posting.text == "goodbye":
+            return "ERROR 505"
+        elif posting.text != "hello":
             #recebemos a id da nossa sessao e guardamos como um cookie que queremos enviar nas seguintes comunicações
             cookies['session_id'] = posting.text
-            print(posting.text)
             #CSUIT negotiation
             algorithms = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
             modes = ['CFB', 'CTR', 'OFB']
@@ -291,9 +315,6 @@ def main():
             cifras += [start_hmac(key3)]
         # set activesession as True cause there is a active session up and running
         activesession = True
-    #this is for testing comunication ignore these lines
-    #posting = requests.post(f'{SERVER_URL}/api/ok', data=cifrar("Testing Hello"), cookies=cookies)
-    #print(decifrar(posting.content))
 
     #get music list now that we have permission
     req = requests.get(f'{SERVER_URL}/api/list', cookies=cookies)
