@@ -434,7 +434,6 @@ class MediaServer(resource.Resource):
                     users += [who.decode('latin')]
                     return who
                 else:
-                    print(goodbye)
                     return b"goobye"
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')

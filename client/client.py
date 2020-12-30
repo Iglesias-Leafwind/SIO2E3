@@ -3,6 +3,7 @@ Licenca por musica que o user so precisa de mostrar por leitura da musica depois
 Se a licenca acabar o user precisa pedir outra licenca / pede automaticamente
 User vai mandar o seu CC como identificador de log in e o server envia um uuid para ele distinguir os users
 """
+
 import requests
 import logging
 import binascii
@@ -191,8 +192,8 @@ def main():
         #Filter attributes
         all_attr = [e for e in all_attr if isinstance(e, int)]
 
+        client_cert = ""
         for slot in slots:
-            print(pkcs11.getTokenInfo(slot))
             session = pkcs11.openSession(slot)
 
             for obj in session.findObjects():
@@ -205,14 +206,11 @@ def main():
                 print(" Label: ", attr["CKA_LABEL"])
 
                 if attr["CKA_CLASS"] == 1:
-                    
-                    client_cert = load_certificate(bytes(attr["CKA_VALUE"]))
+                    client_cert = x509.load_der_x509_certificate(bytes(attr["CKA_VALUE"]), default_backend())
 
         #dizemos hello ao server
         posting = requests.post(f'{SERVER_URL}/api/hello',cookies=cookies,data=client_cert.public_bytes(encoding = serialization.Encoding.PEM))
         #se o que recebermos não é hello quer dizer que nao existe uma sessao aberta
-        #TODO aqui autenticamos pelo cc e fechamos a sessao aberta se o cc for o correto
-        #TODO E abrimos uma nova sessao
         if posting.text != "hello":
             #recebemos a id da nossa sessao e guardamos como um cookie que queremos enviar nas seguintes comunicações
             cookies['session_id'] = posting.text
