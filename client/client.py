@@ -330,7 +330,7 @@ def main():
     idx = 0
     print("MEDIA CATALOG\n")
     for item in media_list:
-        d = datetime.now() + timedelta(seconds = 1)
+        d = datetime.now() + timedelta(minutes = 5)
         mylicenses[idx] = [1, d.timestamp()]
         print(f'{idx} - {media_list[idx]["name"]}')
         idx += idx
