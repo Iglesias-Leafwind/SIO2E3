@@ -48,8 +48,8 @@ algort = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
 modos = ['CFB', 'CTR', 'OFB']
 dg =['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
 #this is where we keep all user ids
-#TODO turn this into a dict with cc and id verification? or just use CC as ID?
-users = []
+#dict with id: cc
+users = {}
 #this is where we keep CSUIT of each user through their id
 CSUIT = {}
 #this is where we keep a list of ciphers used in the comunication through user id
@@ -68,6 +68,11 @@ server_cert = ""
 with open("localhost.crt", "rb") as file:
     certificate_data = file.read()
     server_cert = x509.load_pem_x509_certificate(certificate_data, backend=default_backend())
+
+crl = ""
+with open("GTS1O1core.crl", "rb") as file:
+    crl_data = file.read()
+    crl = x509.load_der_x509_crl(crl_data, backend=default_backend())
 
 all_files = os.scandir("/etc/ssl/certs")
 for f in all_files:
@@ -289,15 +294,32 @@ class MediaServer(resource.Resource):
         if datetime.now().timestamp() > cert.not_valid_after.timestamp() or datetime.now().timestamp() < cert.not_valid_before.timestamp():
             print("Expired Certificate")
             return False
-        print("Valid Certificate")
         return True
     
     def verify_extensions(self, client_cert):
+        values = ""
+        flag = ""
         try:
-            values = client_cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE).values
-        except ExtensionNotFoundException:
-            print("Invalid certificate")
-            return False
+            values = client_cert.extensions.get_extension_for_oid(ExtensionOID.EXTENDED_KEY_USAGE).value
+            flag = "i"
+        except x509.ExtensionNotFound:
+            values = client_cert.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+            flag = "ca"
+
+        if flag == "i":
+            for value in values:
+                if (flag == "i" and value._name == "clientAuth"):
+                    return True
+        else:
+            if (flag == "ca" and values.key_cert_sign):
+                return True
+        return False
+
+    def verify_crl(self, client_cert):
+        global crl
+        for revoked_cert in crl:
+            if revoked_cert.serial_number == client_cert.serial_number:
+                return False
         return True
 
     # Handle a GET request
@@ -408,13 +430,12 @@ class MediaServer(resource.Resource):
                 ciphers[who] = [cf1,cf2,cf3]
                 return json.dumps({'pem':pem.decode('latin'),'ivs':[iv1.decode('latin'),iv2.decode('latin')]}, indent=4).encode('latin')
             elif request.path == b'/api/bye':
-                #TODO check CC to say bye
-                if decifrar(request.content.getvalue(),who) == "encripted bye message":
+                if request.content.getvalue() == users[who]:
+                    print(decifrar(request.content.getvalue(),who))
                     users.remove(who)
                     return b"bye"
                 return b"No"
             elif request.path == b'/api/hello':
-                #TODO check CC and send user id if cc is correct
                 if(who in users):
                     return b"hello"
                 bcert = request.content.getvalue()
@@ -425,7 +446,7 @@ class MediaServer(resource.Resource):
                 chain = get_issuers(client_cert, trusted_certs, [])
                 if chain:
                     for cert in chain:
-                        if not (self.verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and self.verify_dates(cert)):
+                        if not (self.verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and self.verify_dates(cert) and self.verify_extensions(cert) and self.verify_crl(cert)):
                             isVerified = False
                 else:
                     isVerified = False
@@ -434,11 +455,10 @@ class MediaServer(resource.Resource):
                     who = os.urandom(16)
                     while(who.decode('latin') in users):
                         who = os.urandom(16)
-                    users += [who.decode('latin')]
+                    users[who.decode('latin')] = client_cert
                     return who
                 else:
-                    print(goodbye)
-                    return b"goobye"
+                    return b"goodbye"
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 return b'Methods: /api/csuit /api/hello /api/bye /api/difhell'
