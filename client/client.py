@@ -1,7 +1,5 @@
 """
 Licenca por musica que o user so precisa de mostrar por leitura da musica depois de receber a licenca
-Se a licenca acabar o user precisa pedir outra licenca / pede automaticamente
-User vai mandar o seu CC como identificador de log in e o server envia um uuid para ele distinguir os users
 """
 
 import requests
@@ -23,7 +21,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography import x509, exceptions
 from cryptography.x509.oid import NameOID, ExtensionOID
-from datetime import datetime
+from datetime import datetime, timedelta
 from cert_functs import *
 import PyKCS11
 import binascii
@@ -49,8 +47,11 @@ logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.INFO)
 #Server URl
 SERVER_URL = 'http://127.0.0.1:8080'
-trusted_certs = {}
 
+client_cert = ""
+
+trusted_certs = {}
+mylicenses = {}
 
 crl = ""
 with open("GTS1O1core.crl", "rb") as file:
@@ -184,6 +185,7 @@ def main():
     global cifras
     global CSUIT
     global dKey
+    global client_cert
     #se ainda n existir uma activesession
 
     if not activesession:
@@ -215,7 +217,6 @@ def main():
         #Filter attributes
         all_attr = [e for e in all_attr if isinstance(e, int)]
         
-        client_cert = ""
         for slot in slots:
             session = pkcs11.openSession(slot)
 
@@ -230,12 +231,8 @@ def main():
 
                 if attr["CKA_CLASS"] == 1:
                     client_cert = x509.load_der_x509_certificate(bytes(attr["CKA_VALUE"]), default_backend())
-        """
-        with open("client.crt", "rb") as file:
-            data = file.read()
         
-        client_cert = x509.load_pem_x509_certificate(data, backend=default_backend())
-        """
+        
         #dizemos hello ao server
         posting = requests.post(f'{SERVER_URL}/api/hello',cookies=cookies,data=client_cert.public_bytes(encoding = serialization.Encoding.PEM))
         #se o que recebermos não é hello quer dizer que nao existe uma sessao aberta
@@ -333,7 +330,10 @@ def main():
     idx = 0
     print("MEDIA CATALOG\n")
     for item in media_list:
+        d = datetime.now() + timedelta(seconds = 1)
+        mylicenses[idx] = [1, d.timestamp()]
         print(f'{idx} - {media_list[idx]["name"]}')
+        idx += idx
     print("----")
 
     while True:
@@ -348,8 +348,13 @@ def main():
         if not selection.isdigit():
             continue
 
+        if mylicenses.get(int(selection))[0] == 0 or datetime.now().timestamp() > mylicenses.get(int(selection))[1]:
+            continue
+
         selection = int(selection)
         if 0 <= selection < len(media_list):
+            mylicenses[selection][0] -= 1
+            print(mylicenses.get(int(selection))[0])
             break
 
     # Example: Download first file
