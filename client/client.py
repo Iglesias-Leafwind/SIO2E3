@@ -342,7 +342,7 @@ def main():
             # we can only leave this session with this user when the server receives this encripted message
             # in case someone steals your id and tries to stop you from staying logged in then he needs to know your keys
             # and CSUIT to stop you
-            posting = requests.post(f'{SERVER_URL}/api/bye',cookies=cookies,data=cifrar("encripted bye message"))
+            posting = requests.post(f'{SERVER_URL}/api/bye',cookies=cookies,data=client_cert.public_bytes(encoding = serialization.Encoding.PEM))
             sys.exit(0)
 
         if not selection.isdigit():

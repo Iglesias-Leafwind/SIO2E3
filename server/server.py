@@ -46,8 +46,8 @@ algort = ['AES', 'SEED', 'CAST5', 'TripleDES', 'Camellia']
 modos = ['CFB', 'CTR', 'OFB']
 dg =['SHA256', 'SHA512', 'SHA3256', 'SHA3512']
 #this is where we keep all user ids
-#TODO turn this into a dict with cc and id verification? or just use CC as ID?
-users = []
+#dict with id: cc
+users = {}
 #this is where we keep CSUIT of each user through their id
 CSUIT = {}
 #this is where we keep a list of ciphers used in the comunication through user id
@@ -427,13 +427,12 @@ class MediaServer(resource.Resource):
                 ciphers[who] = [cf1,cf2,cf3]
                 return json.dumps({'pem':pem.decode('latin'),'ivs':[iv1.decode('latin'),iv2.decode('latin')]}, indent=4).encode('latin')
             elif request.path == b'/api/bye':
-                #TODO check CC to say bye
-                if decifrar(request.content.getvalue(),who) == "encripted bye message":
+                if request.content.getvalue() == users[who]:
+                    print(decifrar(request.content.getvalue(),who))
                     users.remove(who)
                     return b"bye"
                 return b"No"
             elif request.path == b'/api/hello':
-                #TODO check CC and send user id if cc is correct
                 if(who in users):
                     return b"hello"
                 bcert = request.content.getvalue()
@@ -453,7 +452,7 @@ class MediaServer(resource.Resource):
                     who = os.urandom(16)
                     while(who.decode('latin') in users):
                         who = os.urandom(16)
-                    users += [who.decode('latin')]
+                    users[who.decode('latin')] = client_cert
                     return who
                 else:
                     return b"goodbye"
