@@ -51,13 +51,12 @@ logger.setLevel(logging.INFO)
 SERVER_URL = 'http://127.0.0.1:8080'
 trusted_certs = {}
 
-"""
+
 crl = ""
 with open("GTS1O1core.crl", "rb") as file:
     crl_data = file.read()
-    print(type(crl_data))
-    crl = x509.load_pem_x509_crl(crl_data)
-"""
+    crl = x509.load_der_x509_crl(crl_data)
+
 all_files = os.scandir("/etc/ssl/certs")
 for f in all_files:
     if not f.is_dir():
@@ -161,13 +160,19 @@ def verify_extensions(client_cert):
 
     if flag == "i":
         for value in values:
-            print("here " + value._name)
             if (flag == "i" and value._name == "clientAuth"):
                 return True
     else:
         if (flag == "ca" and values.key_cert_sign):
             return True
     return False
+
+def verify_crl(client_cert):
+    global crl
+    for revoked_cert in crl:
+        if revoked_cert.serial_number == client_cert.serial_number:
+            return False
+    return True
 
 #activesession é usado para ver se ja temos alguma sessao ja aberta ou nao
 activesession = False
@@ -193,7 +198,7 @@ def main():
         chain = get_issuers(server_cert, trusted_certs, [])
         if chain:
             for cert in chain:
-                if not (verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and verify_dates(cert) and verify_extensions(cert)):
+                if not (verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and verify_dates(cert) and verify_extensions(cert) and verify_crl(cert)):
                     isVerified = False
         else:
             isVerified = False
@@ -229,7 +234,7 @@ def main():
         with open("client.crt", "rb") as file:
             data = file.read()
         
-        client_cert = x509.load_pem_x509_certificate(c, backend=default_backend())
+        client_cert = x509.load_pem_x509_certificate(data, backend=default_backend())
         """
         #dizemos hello ao server
         posting = requests.post(f'{SERVER_URL}/api/hello',cookies=cookies,data=client_cert.public_bytes(encoding = serialization.Encoding.PEM))

@@ -67,6 +67,11 @@ with open("localhost.crt", "rb") as file:
     certificate_data = file.read()
     server_cert = x509.load_pem_x509_certificate(certificate_data, backend=default_backend())
 
+crl = ""
+with open("GTS1O1core.crl", "rb") as file:
+    crl_data = file.read()
+    crl = x509.load_der_x509_crl(crl_data, backend=default_backend())
+
 all_files = os.scandir("/etc/ssl/certs")
 for f in all_files:
     if not f.is_dir():
@@ -300,13 +305,19 @@ class MediaServer(resource.Resource):
 
         if flag == "i":
             for value in values:
-                print("here " + value._name)
                 if (flag == "i" and value._name == "clientAuth"):
                     return True
         else:
             if (flag == "ca" and values.key_cert_sign):
                 return True
         return False
+
+    def verify_crl(self, client_cert):
+        global crl
+        for revoked_cert in crl:
+            if revoked_cert.serial_number == client_cert.serial_number:
+                return False
+        return True
 
     # Handle a GET request
     def render_GET(self, request):
@@ -433,7 +444,7 @@ class MediaServer(resource.Resource):
                 chain = get_issuers(client_cert, trusted_certs, [])
                 if chain:
                     for cert in chain:
-                        if not (self.verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and self.verify_dates(cert) and self.verify_extensions(cert)):
+                        if not (self.verify_signature(trusted_certs[cert.issuer.rfc4514_string()], cert) and self.verify_dates(cert) and self.verify_extensions(cert) and self.verify_crl(cert)):
                             isVerified = False
                 else:
                     isVerified = False
