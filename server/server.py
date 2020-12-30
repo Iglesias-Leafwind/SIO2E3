@@ -243,6 +243,7 @@ class MediaServer(resource.Resource):
             filch = dcript.update(filch.read()) + dcript.finalize()
             data = filch[offset:]
             data = data[0:CHUNK_SIZE]
+
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
             # cifrar com rotação de chaves
             # using dkey para derivar
