@@ -370,7 +370,7 @@ def main():
         decriptar.update(criptedData['data'].encode('latin'))
         MAClinha = decriptar.finalize()
         if (MAClinha != criptedData['HMAC'].encode('latin')):
-            return "ERROR 500"
+            break
 
         decifrado = mainDataCipher.update(criptedData['data'].encode('latin')) + mainDataCipher.finalize()
         chunk = json.loads(decifrado.decode('latin'))

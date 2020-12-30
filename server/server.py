@@ -26,6 +26,8 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
+dcipher = Cipher(algorithms.AES(b'\x07JO\xb0\xe7\xaa\r\xad\xb5M\x04\x91B\xd9\x0c\xa0'), modes.CFB(b'\xc61-Ba\xc7,*w\xad\x93\xdf\xc6\x1d\xe9\x0e'))
+
 #music catalog
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
             {
@@ -231,10 +233,11 @@ class MediaServer(resource.Resource):
         #TODO verificaçao de licensa?
         readings[who][media_id] += CHUNK_SIZE
         # Open file, seek to correct position and return the chunk
-        with open(os.path.join(CATALOG_BASE, media_item['file_name']), 'rb') as f:
-            f.seek(offset)
-            data = f.read(CHUNK_SIZE)
-
+        with open(os.path.join(CATALOG_BASE, media_item['file_name']), 'rb') as filch:
+            dcript = dcipher.decryptor()
+            filch = dcript.update(filch.read()) + dcript.finalize()
+            data = filch[offset:]
+            data = data[0:CHUNK_SIZE]
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
             # cifrar com rotação de chaves
             # using dkey para derivar
