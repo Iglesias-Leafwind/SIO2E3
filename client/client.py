@@ -161,7 +161,7 @@ def verify_extensions(client_cert):
 
     if flag == "i":
         for value in values:
-            if (flag == "i" and value._name == "clientAuth"):
+            if (flag == "i" and value._name == "serverAuth"):
                 return True
     else:
         if (flag == "ca" and values.key_cert_sign):
@@ -191,6 +191,7 @@ def main():
     if not activesession:
         # Get a list of media files
         print("Contacting Server")
+        #se o que recebermos não é hello quer dizer que nao existe uma sessao aberta
 
         server_cert = requests.get(f'{SERVER_URL}/api/certs', cookies=cookies)
         server_cert = x509.load_pem_x509_certificate(server_cert.content, backend=default_backend())
@@ -206,7 +207,7 @@ def main():
             isVerified = False
         if not isVerified:
             return "ERROR 505"
-        
+        """
         pkcs11 = PyKCS11.PyKCS11Lib()
         pkcs11.load("/usr/local/lib/libpteidpkcs11.so")
 
@@ -231,8 +232,12 @@ def main():
 
                 if attr["CKA_CLASS"] == 1:
                     client_cert = x509.load_der_x509_certificate(bytes(attr["CKA_VALUE"]), default_backend())
+        """
         
-        
+        with open("client.crt", "rb") as file:
+            certificate_data = file.read()
+            client_cert = x509.load_pem_x509_certificate(certificate_data, backend=default_backend())
+
         #dizemos hello ao server
         posting = requests.post(f'{SERVER_URL}/api/hello',cookies=cookies,data=client_cert.public_bytes(encoding = serialization.Encoding.PEM))
         #se o que recebermos não é hello quer dizer que nao existe uma sessao aberta
@@ -348,11 +353,10 @@ def main():
         if not selection.isdigit():
             continue
 
-        if mylicenses.get(int(selection))[0] == 0 or datetime.now().timestamp() > mylicenses.get(int(selection))[1]:
-            continue
-
         selection = int(selection)
         if 0 <= selection < len(media_list):
+            if mylicenses.get(int(selection))[0] == 0 or datetime.now().timestamp() > mylicenses.get(int(selection))[1]:
+                continue
             mylicenses[selection][0] -= 1
             print(mylicenses.get(int(selection))[0])
             break
